@@ -16,6 +16,7 @@ import com.ibm.websphere.sib.SIDestinationAddress;
 import com.ibm.websphere.sib.SIDestinationAddressFactory;
 import com.ibm.websphere.sib.api.jms.JmsDestination;
 import com.ibm.websphere.sib.exception.SIException;
+import com.ibm.websphere.sib.exception.SIResourceException;
 import com.ibm.ws.sib.api.jms.JmsInternalsFactory;
 import com.ibm.ws.sib.api.jms.JmsSharedUtils;
 import com.ibm.ws.sib.security.auth.AuthUtils;
@@ -28,6 +29,11 @@ import com.ibm.wsspi.sib.core.LockedMessageEnumeration;
 import com.ibm.wsspi.sib.core.SIBusMessage;
 import com.ibm.wsspi.sib.core.SICoreConnection;
 import com.ibm.wsspi.sib.core.SICoreConnectionFactory;
+import com.ibm.wsspi.sib.core.exception.SIConnectionDroppedException;
+import com.ibm.wsspi.sib.core.exception.SIConnectionLostException;
+import com.ibm.wsspi.sib.core.exception.SIConnectionUnavailableException;
+import com.ibm.wsspi.sib.core.exception.SISessionDroppedException;
+import com.ibm.wsspi.sib.core.exception.SISessionUnavailableException;
 import com.ibm.wsspi.sib.core.selector.FactoryType;
 import com.ibm.wsspi.sib.core.selector.SICoreConnectionFactorySelector;
 
@@ -87,5 +93,15 @@ public class SibBatchActivation implements AsynchConsumerCallback {
         }
         SibBatchWork work = new SibBatchWork(this, messages);
         resourceAdapter.getBootstrapContext().getWorkManager().scheduleWork(work, Long.MAX_VALUE, null, work);
+    }
+
+    public void deactivate() {
+        try {
+            session.stop();
+            connection.close();
+        } catch (SIException ex) {
+            // TODO
+            ex.printStackTrace(System.out);
+        }
     }
 }

@@ -11,8 +11,6 @@ import javax.resource.spi.work.Work;
 import javax.resource.spi.work.WorkEvent;
 import javax.resource.spi.work.WorkListener;
 
-import com.ibm.websphere.sib.SIMessage;
-import com.ibm.ws.sib.api.jms.JmsInternalsFactory;
 import com.ibm.wsspi.sib.core.SIBusMessage;
 import com.ibm.wsspi.sib.core.SIMessageHandle;
 import com.ibm.wsspi.sib.core.SIXAResource;
@@ -37,37 +35,35 @@ public class SibBatchWork implements Work, WorkListener {
     }
 
     public void run() {
-        // TODO Auto-generated method stub
-        
         // see SibRaDispatcher#dispatch(List, AsynchDispatchScheduler, SibRaListener)
-        
-        SIXAResource xaResource = activation.getConnection().getSIXAResource();
-        
-        MessageEndpoint endpoint = activation.getEndpointFactory().createEndpoint(xaResource);
+
         try {
-            MessageListener listener = (MessageListener)endpoint;
+            SIXAResource xaResource = activation.getConnection().getSIXAResource();
             
-            endpoint.beforeDelivery(ON_MESSAGE_METHOD);
+            MessageEndpoint endpoint = activation.getEndpointFactory().createEndpoint(xaResource);
             try {
-                List<SIMessageHandle> handles = new ArrayList<SIMessageHandle>(messages.size());
-                for (SIBusMessage message : messages) {
-                    handles.add(message.getMessageHandle());
-                }
-                activation.getSession().deleteSet(handles.toArray(new SIMessageHandle[handles.size()]), xaResource);
+                MessageListener listener = (MessageListener)endpoint;
                 
-                for (SIBusMessage message : messages) {
-                    //   delete message
+                endpoint.beforeDelivery(ON_MESSAGE_METHOD);
+                try {
+                    List<SIMessageHandle> handles = new ArrayList<SIMessageHandle>(messages.size());
+                    for (SIBusMessage message : messages) {
+                        handles.add(message.getMessageHandle());
+                    }
+                    activation.getSession().deleteSet(handles.toArray(new SIMessageHandle[handles.size()]), xaResource);
                     
-                    
-                    Message jmsMessage = activation.getJmsSharedUtils().inboundMessagePath(message, null, null /* passThruProps */);
-                    listener.onMessage(jmsMessage);
-                    
+                    for (SIBusMessage message : messages) {
+                        Message jmsMessage = activation.getJmsSharedUtils().inboundMessagePath(message, null, null /* passThruProps */);
+                        listener.onMessage(jmsMessage);
+                    }
+                } finally {
+                    endpoint.afterDelivery();
                 }
             } finally {
-                endpoint.afterDelivery();
+                endpoint.release();
             }
-        } finally {
-            endpoint.release();
+        } catch (Throwable ex) {
+            ex.printStackTrace(System.out);
         }
     }
 
