@@ -13,7 +13,6 @@ import javax.resource.spi.endpoint.MessageEndpointFactory;
 import javax.transaction.xa.XAResource;
 
 import com.ibm.websphere.sib.exception.SIException;
-import com.ibm.ws.sib.security.auth.SIBSecurityException;
 
 // Restrictions:
 //  * SIBus mediations are not executed
@@ -35,8 +34,6 @@ public class SibBatchResourceAdapter implements ResourceAdapter {
             try {
                 activations.put(activationSpec, new SibBatchActivation(this, messageEndpointFactory, (SibBatchActivationSpec)activationSpec));
             } catch (SIException ex) {
-                throw new ResourceException(ex);
-            } catch (SIBSecurityException ex) {
                 throw new ResourceException(ex);
             }
         } else {

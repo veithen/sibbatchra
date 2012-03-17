@@ -12,6 +12,7 @@ import javax.resource.spi.work.WorkEvent;
 import javax.resource.spi.work.WorkListener;
 
 import com.ibm.wsspi.sib.core.SIBusMessage;
+import com.ibm.wsspi.sib.core.SIJMSMessageFactory;
 import com.ibm.wsspi.sib.core.SIMessageHandle;
 import com.ibm.wsspi.sib.core.SIXAResource;
 
@@ -53,8 +54,7 @@ public class SibBatchWork implements Work, WorkListener {
                     activation.getSession().deleteSet(handles.toArray(new SIMessageHandle[handles.size()]), xaResource);
                     
                     for (SIBusMessage message : messages) {
-                        Message jmsMessage = activation.getJmsSharedUtils().inboundMessagePath(message, null, null /* passThruProps */);
-                        listener.onMessage(jmsMessage);
+                        listener.onMessage(SIJMSMessageFactory.getInstance().createJMSMessage(message));
                     }
                 } finally {
                     endpoint.afterDelivery();
