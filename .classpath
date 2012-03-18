@@ -9,5 +9,6 @@
 			<attribute name="owner.project.facets" value="java"/>
 		</attributes>
 	</classpathentry>
+	<classpathentry kind="var" path="WAS7_ROOT_DIR/plugins/com.ibm.ws.runtime.jar"/>
 	<classpathentry kind="output" path="build/classes"/>
 </classpath>

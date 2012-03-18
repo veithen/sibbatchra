@@ -1,9 +1,7 @@
 package ra;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import javax.resource.ResourceException;
 import javax.resource.spi.endpoint.MessageEndpointFactory;
@@ -19,27 +17,20 @@ import com.ibm.wsspi.sib.core.DestinationType;
 import com.ibm.wsspi.sib.core.LockedMessageEnumeration;
 import com.ibm.wsspi.sib.core.SIBusMessage;
 import com.ibm.wsspi.sib.core.SICoreConnection;
-import com.ibm.wsspi.sib.core.SICoreConnectionFactory;
-import com.ibm.wsspi.sib.core.selector.FactoryType;
-import com.ibm.wsspi.sib.core.selector.SICoreConnectionFactorySelector;
 
 public class SibBatchActivation implements AsynchConsumerCallback {
     private final SibBatchResourceAdapter resourceAdapter;
     private final MessageEndpointFactory messageEndpointFactory;
+    private SibBatchResourceInfo resourceInfo;
     private SICoreConnection connection;
     private ConsumerSession session;
     
     public SibBatchActivation(SibBatchResourceAdapter resourceAdapter, MessageEndpointFactory messageEndpointFactory, SibBatchActivationSpec spec) throws SIException, ResourceException {
         this.resourceAdapter = resourceAdapter;
         this.messageEndpointFactory = messageEndpointFactory;
-        SICoreConnectionFactory factory = SICoreConnectionFactorySelector.getSICoreConnectionFactory(FactoryType.TRM_CONNECTION);
-        Map properties = new HashMap();
-        properties.put("busName", spec.getBusName());
-        // TODO: other properties: targetType, targetGroup, targetSignificance, targetTransportChain, providerEndpoints
-        
         // TODO: all this should be deferred so that we can retry if the connection attempt fails (and also reconnect)
-        // TODO: security not supported
-        connection = factory.createConnection(null, null, properties);
+        resourceInfo = spec.getResourceInfo();
+        connection = resourceInfo.createConnection();
         // TODO: register a connection listener
         
         JmsDestination jmsDestination = (JmsDestination)spec.getDestination();
@@ -51,6 +42,10 @@ public class SibBatchActivation implements AsynchConsumerCallback {
 
     public MessageEndpointFactory getEndpointFactory() {
         return messageEndpointFactory;
+    }
+
+    public SibBatchResourceInfo getResourceInfo() {
+        return resourceInfo;
     }
 
     public SICoreConnection getConnection() {

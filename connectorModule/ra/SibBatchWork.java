@@ -1,32 +1,22 @@
 package ra;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
-import javax.jms.Message;
 import javax.jms.MessageListener;
 import javax.resource.spi.endpoint.MessageEndpoint;
 import javax.resource.spi.work.Work;
 import javax.resource.spi.work.WorkEvent;
 import javax.resource.spi.work.WorkListener;
 
+import com.ibm.ws.Transaction.TransactionManagerFactory;
+import com.ibm.ws.Transaction.WebSphereTransactionManager;
 import com.ibm.wsspi.sib.core.SIBusMessage;
 import com.ibm.wsspi.sib.core.SIJMSMessageFactory;
 import com.ibm.wsspi.sib.core.SIMessageHandle;
 import com.ibm.wsspi.sib.core.SIXAResource;
 
 public class SibBatchWork implements Work, WorkListener {
-    private static final Method ON_MESSAGE_METHOD;
-    
-    static {
-        try {
-            ON_MESSAGE_METHOD = MessageListener.class.getMethod("onMessage", new Class[] { Message.class });
-        } catch (NoSuchMethodException ex) {
-            throw new NoSuchMethodError(ex.getMessage());
-        }
-    }
-    
     private final SibBatchActivation activation;
     private final List<SIBusMessage> messages;
 
@@ -39,29 +29,37 @@ public class SibBatchWork implements Work, WorkListener {
         // see SibRaDispatcher#dispatch(List, AsynchDispatchScheduler, SibRaListener)
 
         try {
+            WebSphereTransactionManager transactionManager = TransactionManagerFactory.getTransactionManager();
             SIXAResource xaResource = activation.getConnection().getSIXAResource();
             
-            MessageEndpoint endpoint = activation.getEndpointFactory().createEndpoint(xaResource);
+            // By default, transaction demarcation is handled by the beforeDelivery and afterDelivery methods
+            // of the MessageEndpoint object. However, the JCA spec forbids to deliver multiple messages between
+            // a call to beforeDelivery and a call to afterDelivery. Therefore we manage the transaction
+            // explicitly. In this case, the transaction will appear as an imported transaction (see the JCA
+            // spec) to the MessageEndpoint.
+            transactionManager.begin();
+            transactionManager.enlist(xaResource, SibBatchResourceFactory.class.getName(), activation.getResourceInfo());
+            
+            // For an imported transaction, the XAResource provided to createEndpoint is ignored.
+            MessageEndpoint endpoint = activation.getEndpointFactory().createEndpoint(null);
             try {
                 MessageListener listener = (MessageListener)endpoint;
                 
-                endpoint.beforeDelivery(ON_MESSAGE_METHOD);
-                try {
-                    List<SIMessageHandle> handles = new ArrayList<SIMessageHandle>(messages.size());
-                    for (SIBusMessage message : messages) {
-                        handles.add(message.getMessageHandle());
-                    }
-                    activation.getSession().deleteSet(handles.toArray(new SIMessageHandle[handles.size()]), xaResource);
-                    
-                    for (SIBusMessage message : messages) {
-                        listener.onMessage(SIJMSMessageFactory.getInstance().createJMSMessage(message));
-                    }
-                } finally {
-                    endpoint.afterDelivery();
+                List<SIMessageHandle> handles = new ArrayList<SIMessageHandle>(messages.size());
+                for (SIBusMessage message : messages) {
+                    handles.add(message.getMessageHandle());
+                }
+                activation.getSession().deleteSet(handles.toArray(new SIMessageHandle[handles.size()]), xaResource);
+                
+                for (SIBusMessage message : messages) {
+                    listener.onMessage(SIJMSMessageFactory.getInstance().createJMSMessage(message));
                 }
             } finally {
                 endpoint.release();
             }
+            
+            transactionManager.commit();
+            
         } catch (Throwable ex) {
             ex.printStackTrace(System.out);
         }

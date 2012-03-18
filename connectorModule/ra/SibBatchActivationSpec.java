@@ -52,4 +52,13 @@ public class SibBatchActivationSpec implements ActivationSpec, Serializable {
         // TODO Auto-generated method stub
         
     }
+    
+    public SibBatchResourceInfo getResourceInfo() {
+        // TODO: there is something wrong here: recovery can only be successful if the transaction
+        //       manager connects to the right messaging engine; if there are multiple messaging
+        //       engines in the bus, then it's not enough to provide the bus name. Probably we need
+        //       to complete the resource info with the messaging engine UUID after we have
+        //       established a connection.
+        return new SibBatchResourceInfo(busName);
+    }
 }
