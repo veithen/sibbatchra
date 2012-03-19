@@ -35,7 +35,7 @@ public class SibBatchWork implements Work, WorkListener {
 
     public void run() {
         if (logger.isLoggable(Level.FINE)) {
-            logger.log(Level.FINE, "Start processing batch " + batchId);
+            logger.log(Level.FINE, "Start processing batch " + batchId + " (size=" + messages.size() + ")");
         }
 
         try {
@@ -134,7 +134,7 @@ public class SibBatchWork implements Work, WorkListener {
         // TODO Auto-generated method stub
         
         if (logger.isLoggable(Level.FINE)) {
-            logger.log(Level.FINE, "Batch " + batchId + ": work start");
+            logger.log(Level.FINE, "Batch " + batchId + ": work started");
         }
     }
     

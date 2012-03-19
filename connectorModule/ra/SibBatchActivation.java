@@ -1,6 +1,7 @@
 package ra;
 
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -82,13 +83,6 @@ public class SibBatchActivation implements AsynchConsumerCallback {
             logger.log(Level.FINE, "Got " + lockedMessages.getRemainingMessageCount() + " messages from session");
         }
         synchronized (batchLock) {
-            if (batchTimeoutTask != null) {
-                if (logger.isLoggable(Level.FINE)) {
-                    logger.log(Level.FINE, "Cancelling existing batch timeout task " + batchTimeoutTask);
-                }
-                batchTimeoutTask.cancel();
-                batchTimeoutTask = null;
-            }
             int maxBatchSize = spec.getMaxBatchSize();
             SIBusMessage message;
             while ((message = lockedMessages.nextLocked()) != null) {
@@ -106,30 +100,41 @@ public class SibBatchActivation implements AsynchConsumerCallback {
                         logger.log(Level.FINE, "Match bax size (" + maxBatchSize + ") reached for batch " + batchId);
                     }
                     scheduleBatch();
+                    if (batchTimeoutTask != null) {
+                        if (logger.isLoggable(Level.FINE)) {
+                            logger.log(Level.FINE, "Cancelling batch timeout task " + batchTimeoutTask + " for batch " + batchId);
+                        }
+                        batchTimeoutTask.cancel();
+                        batchTimeoutTask = null;
+                    }
                 }
             }
-            if (batch != null) {
-                long delay = batchStartTime + spec.getBatchTimeout() - System.currentTimeMillis();
-                if (delay > 0) {
-                    final int batchId = this.batchId;
+            if (batch != null && batchTimeoutTask == null) {
+                long time = batchStartTime + spec.getBatchTimeout();
+                if (time > System.currentTimeMillis()) {
                     batchTimeoutTask = new TimerTask() {
                         @Override
                         public void run() {
-                            if (logger.isLoggable(Level.FINE)) {
-                                logger.log(Level.FINE, "Batch " + batchId + " timed out");
-                            }
-                            try {
-                                scheduleBatch();
-                            } catch (WorkException ex) {
-                                // TODO Auto-generated catch block
-                                ex.printStackTrace();
+                            synchronized (batchLock) {
+                                if (batchTimeoutTask == this) {
+                                    if (logger.isLoggable(Level.FINE)) {
+                                        logger.log(Level.FINE, "Batch " + batchId + " timed out");
+                                    }
+                                    try {
+                                        scheduleBatch();
+                                    } catch (WorkException ex) {
+                                        // TODO Auto-generated catch block
+                                        ex.printStackTrace();
+                                    }
+                                    batchTimeoutTask = null;
+                                }
                             }
                         }
                     };
                     if (logger.isLoggable(Level.FINE)) {
-                        logger.log(Level.FINE, "Scheduling batch timeout task " + batchTimeoutTask + " for batch " + batchId + "; delay=" + delay);
+                        logger.log(Level.FINE, "Scheduling batch timeout task " + batchTimeoutTask + " for batch " + batchId + "; time=" + time);
                     }
-                    timer.schedule(batchTimeoutTask, delay);
+                    timer.schedule(batchTimeoutTask, new Date(time));
                 } else {
                     logger.log(Level.FINE, "Batch " + batchId + " timed out; schedule immediately");
                     scheduleBatch();
@@ -139,20 +144,20 @@ public class SibBatchActivation implements AsynchConsumerCallback {
     }
     
     private void scheduleBatch() throws WorkException {
-        synchronized (batchLock) {
-            if (batch != null) {
-                logger.log(Level.FINE, "Scheduling batch " + batchId + " for processing");
-                SibBatchWork work = new SibBatchWork(this, batch, batchId);
-                resourceAdapter.getBootstrapContext().getWorkManager().scheduleWork(work, Long.MAX_VALUE, null, work);
-                batch = null;
-                batchStartTime = -1;
-            }
-        }
+        logger.log(Level.FINE, "Scheduling batch " + batchId + " for processing");
+        SibBatchWork work = new SibBatchWork(this, batch, batchId);
+        resourceAdapter.getBootstrapContext().getWorkManager().scheduleWork(work, Long.MAX_VALUE, null, work);
+        batch = null;
+        batchStartTime = -1;
     }
 
     public void deactivate() {
-        // TODO: need to unlock the remaining messages that have not been scheduled for processing
         timer.cancel();
+        
+        // Note: there may still be pending messages at this point, but they will be unlocked
+        //       automatically when the connection is closed; no further action is required
+        //       for these messages
+        
         try {
             session.stop();
             connection.close();
