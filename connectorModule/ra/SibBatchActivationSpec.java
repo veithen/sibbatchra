@@ -15,6 +15,7 @@ public class SibBatchActivationSpec implements ActivationSpec, Serializable {
     private String busName;
     private Destination destination;
     private int maxBatchSize;
+    private int batchTimeout;
     
     public ResourceAdapter getResourceAdapter() {
         return resourceAdapter;
@@ -46,6 +47,14 @@ public class SibBatchActivationSpec implements ActivationSpec, Serializable {
 
     public void setMaxBatchSize(int maxBatchSize) {
         this.maxBatchSize = maxBatchSize;
+    }
+
+    public int getBatchTimeout() {
+        return batchTimeout;
+    }
+
+    public void setBatchTimeout(int batchTimeout) {
+        this.batchTimeout = batchTimeout;
     }
 
     public void validate() throws InvalidPropertyException {

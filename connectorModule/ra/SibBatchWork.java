@@ -25,14 +25,18 @@ public class SibBatchWork implements Work, WorkListener {
     
     private final SibBatchActivation activation;
     private final List<SIBusMessage> messages;
+    private final int batchId;
 
-    public SibBatchWork(SibBatchActivation activation, List<SIBusMessage> messages) {
+    public SibBatchWork(SibBatchActivation activation, List<SIBusMessage> messages, int batchId) {
         this.activation = activation;
         this.messages = messages;
+        this.batchId = batchId;
     }
 
     public void run() {
-        // see SibRaDispatcher#dispatch(List, AsynchDispatchScheduler, SibRaListener)
+        if (logger.isLoggable(Level.FINE)) {
+            logger.log(Level.FINE, "Start processing batch " + batchId);
+        }
 
         try {
             WebSphereTransactionManager transactionManager = TransactionManagerFactory.getTransactionManager();
@@ -83,6 +87,9 @@ public class SibBatchWork implements Work, WorkListener {
                     rollback = false;
                 }
             } finally {
+                if (logger.isLoggable(Level.FINE)) {
+                    logger.log(Level.FINE, "Processing of batch " + batchId + " completed; rollback=" + rollback);
+                }
                 if (rollback) {
                     try {
                         transactionManager.rollback();
@@ -107,23 +114,35 @@ public class SibBatchWork implements Work, WorkListener {
         
     }
 
-    public void workAccepted(WorkEvent arg0) {
+    public void workAccepted(WorkEvent event) {
         // TODO Auto-generated method stub
         
+        if (logger.isLoggable(Level.FINE)) {
+            logger.log(Level.FINE, "Batch " + batchId + ": work accepted");
+        }
     }
 
-    public void workCompleted(WorkEvent arg0) {
+    public void workRejected(WorkEvent event) {
         // TODO Auto-generated method stub
         
+        if (logger.isLoggable(Level.FINE)) {
+            logger.log(Level.FINE, "Batch " + batchId + ": work rejected");
+        }
     }
 
-    public void workRejected(WorkEvent arg0) {
+    public void workStarted(WorkEvent event) {
         // TODO Auto-generated method stub
         
+        if (logger.isLoggable(Level.FINE)) {
+            logger.log(Level.FINE, "Batch " + batchId + ": work start");
+        }
     }
-
-    public void workStarted(WorkEvent arg0) {
+    
+    public void workCompleted(WorkEvent event) {
         // TODO Auto-generated method stub
         
+        if (logger.isLoggable(Level.FINE)) {
+            logger.log(Level.FINE, "Batch " + batchId + ": work completed");
+        }
     }
 }

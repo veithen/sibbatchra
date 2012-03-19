@@ -2,9 +2,14 @@ package ra;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import javax.resource.ResourceException;
 import javax.resource.spi.endpoint.MessageEndpointFactory;
+import javax.resource.spi.work.WorkException;
 
 import com.ibm.websphere.sib.Reliability;
 import com.ibm.websphere.sib.SIDestinationAddress;
@@ -19,25 +24,41 @@ import com.ibm.wsspi.sib.core.SIBusMessage;
 import com.ibm.wsspi.sib.core.SICoreConnection;
 
 public class SibBatchActivation implements AsynchConsumerCallback {
+    private static final Logger logger = Logger.getLogger(SibBatchActivation.class.getName());
+    
     private final SibBatchResourceAdapter resourceAdapter;
     private final MessageEndpointFactory messageEndpointFactory;
+    private final SibBatchActivationSpec spec;
+    private final Timer timer;
     private SibBatchResourceInfo resourceInfo;
     private SICoreConnection connection;
     private ConsumerSession session;
     
-    public SibBatchActivation(SibBatchResourceAdapter resourceAdapter, MessageEndpointFactory messageEndpointFactory, SibBatchActivationSpec spec) throws SIException, ResourceException {
+    private final Object batchLock = new Object();
+    private int batchId;
+    private List<SIBusMessage> batch;
+    private long batchStartTime = -1;
+    private TimerTask batchTimeoutTask;
+    
+    public SibBatchActivation(SibBatchResourceAdapter resourceAdapter, MessageEndpointFactory messageEndpointFactory, SibBatchActivationSpec spec) throws ResourceException {
         this.resourceAdapter = resourceAdapter;
         this.messageEndpointFactory = messageEndpointFactory;
-        // TODO: all this should be deferred so that we can retry if the connection attempt fails (and also reconnect)
-        resourceInfo = spec.getResourceInfo();
-        connection = resourceInfo.createConnection();
-        // TODO: register a connection listener
-        
-        JmsDestination jmsDestination = (JmsDestination)spec.getDestination();
-        SIDestinationAddress destination = SIDestinationAddressFactory.getInstance().createSIDestinationAddress(jmsDestination.getDestName(), jmsDestination.getBusName());
-        session = connection.createConsumerSession(destination, DestinationType.QUEUE, null /* selectionCriteria */, null /* reliability */, false /* enableReadAhead */, false, Reliability.NONE /* unrecoverableReliability */, true, null /* alternateUser */);
-        session.registerAsynchConsumerCallback(this, 0 /* maxActiveMessages */, 0L /* messageLockExpiry */, spec.getMaxBatchSize(), null);
-        session.start(false);
+        this.spec = spec;
+        this.timer = resourceAdapter.getBootstrapContext().createTimer();
+        try {
+            // TODO: all this should be deferred so that we can retry if the connection attempt fails (and also reconnect)
+            resourceInfo = spec.getResourceInfo();
+            connection = resourceInfo.createConnection();
+            // TODO: register a connection listener
+            
+            JmsDestination jmsDestination = (JmsDestination)spec.getDestination();
+            SIDestinationAddress destination = SIDestinationAddressFactory.getInstance().createSIDestinationAddress(jmsDestination.getDestName(), jmsDestination.getBusName());
+            session = connection.createConsumerSession(destination, DestinationType.QUEUE, null /* selectionCriteria */, null /* reliability */, false /* enableReadAhead */, false, Reliability.NONE /* unrecoverableReliability */, true, null /* alternateUser */);
+            session.registerAsynchConsumerCallback(this, 0 /* maxActiveMessages */, 0L /* messageLockExpiry */, spec.getMaxBatchSize(), null);
+            session.start(false);
+        } catch (SIException ex) {
+            throw new ResourceException(ex);
+        }
     }
 
     public MessageEndpointFactory getEndpointFactory() {
@@ -57,16 +78,81 @@ public class SibBatchActivation implements AsynchConsumerCallback {
     }
 
     public void consumeMessages(LockedMessageEnumeration lockedMessages) throws Throwable {
-        List<SIBusMessage> messages = new ArrayList<SIBusMessage>();
-        SIBusMessage message;
-        while ((message = lockedMessages.nextLocked()) != null) {
-            messages.add(message);
+        if (logger.isLoggable(Level.FINE)) {
+            logger.log(Level.FINE, "Got " + lockedMessages.getRemainingMessageCount() + " messages from session");
         }
-        SibBatchWork work = new SibBatchWork(this, messages);
-        resourceAdapter.getBootstrapContext().getWorkManager().scheduleWork(work, Long.MAX_VALUE, null, work);
+        synchronized (batchLock) {
+            if (batchTimeoutTask != null) {
+                if (logger.isLoggable(Level.FINE)) {
+                    logger.log(Level.FINE, "Cancelling existing batch timeout task " + batchTimeoutTask);
+                }
+                batchTimeoutTask.cancel();
+                batchTimeoutTask = null;
+            }
+            int maxBatchSize = spec.getMaxBatchSize();
+            SIBusMessage message;
+            while ((message = lockedMessages.nextLocked()) != null) {
+                if (batch == null) {
+                    batchId++;
+                    if (logger.isLoggable(Level.FINE)) {
+                        logger.log(Level.FINE, "Starting new batch with ID " + batchId);
+                    }
+                    batch = new ArrayList<SIBusMessage>(maxBatchSize);
+                    batchStartTime = System.currentTimeMillis();
+                }
+                batch.add(message);
+                if (batch.size() == maxBatchSize) {
+                    if (logger.isLoggable(Level.FINE)) {
+                        logger.log(Level.FINE, "Match bax size (" + maxBatchSize + ") reached for batch " + batchId);
+                    }
+                    scheduleBatch();
+                }
+            }
+            if (batch != null) {
+                long delay = batchStartTime + spec.getBatchTimeout() - System.currentTimeMillis();
+                if (delay > 0) {
+                    final int batchId = this.batchId;
+                    batchTimeoutTask = new TimerTask() {
+                        @Override
+                        public void run() {
+                            if (logger.isLoggable(Level.FINE)) {
+                                logger.log(Level.FINE, "Batch " + batchId + " timed out");
+                            }
+                            try {
+                                scheduleBatch();
+                            } catch (WorkException ex) {
+                                // TODO Auto-generated catch block
+                                ex.printStackTrace();
+                            }
+                        }
+                    };
+                    if (logger.isLoggable(Level.FINE)) {
+                        logger.log(Level.FINE, "Scheduling batch timeout task " + batchTimeoutTask + " for batch " + batchId + "; delay=" + delay);
+                    }
+                    timer.schedule(batchTimeoutTask, delay);
+                } else {
+                    logger.log(Level.FINE, "Batch " + batchId + " timed out; schedule immediately");
+                    scheduleBatch();
+                }
+            }
+        }
+    }
+    
+    private void scheduleBatch() throws WorkException {
+        synchronized (batchLock) {
+            if (batch != null) {
+                logger.log(Level.FINE, "Scheduling batch " + batchId + " for processing");
+                SibBatchWork work = new SibBatchWork(this, batch, batchId);
+                resourceAdapter.getBootstrapContext().getWorkManager().scheduleWork(work, Long.MAX_VALUE, null, work);
+                batch = null;
+                batchStartTime = -1;
+            }
+        }
     }
 
     public void deactivate() {
+        // TODO: need to unlock the remaining messages that have not been scheduled for processing
+        timer.cancel();
         try {
             session.stop();
             connection.close();
