@@ -14,7 +14,11 @@ import javax.transaction.xa.XAResource;
 
 // Restrictions:
 //  * SIBus mediations are not executed
-//  * Security is not supported (connection to messaging engine uses the server subject)
+//  * Security is not supported (connection to messaging engine uses null user/password)
+
+// Note: this class should not depend directly on any internal WebSphere classes; otherwise
+//       an update of the resource adapter will fail and one has to uninstall and reinstall
+//       the RAR instead
 public class SibBatchResourceAdapter implements ResourceAdapter {
     private final Map<ActivationSpec,SibBatchActivation> activations = new HashMap<ActivationSpec,SibBatchActivation>();
     private BootstrapContext bootstrapContext;
@@ -40,7 +44,9 @@ public class SibBatchResourceAdapter implements ResourceAdapter {
     }
 
     public XAResource[] getXAResources(ActivationSpec[] activationSpec) throws ResourceException {
-        // TODO Auto-generated method stub
+        // The resource adapter interacts directly with the transaction manager and passes it
+        // the information necessary for recovery. Therefore recovery doesn't rely on getXAResources
+        // and we can return null here.
         return null;
     }
 

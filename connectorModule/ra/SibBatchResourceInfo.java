@@ -13,13 +13,10 @@ import javax.transaction.xa.XAResource;
 import com.ibm.tx.jta.ExtendedTransactionManager;
 import com.ibm.tx.jta.XAResourceFactory;
 import com.ibm.websphere.sib.exception.SIException;
-import com.ibm.websphere.sib.exception.SIIncorrectCallException;
-import com.ibm.websphere.sib.exception.SIResourceException;
 import com.ibm.ws.Transaction.WebSphereTransactionManager;
 import com.ibm.ws.Transaction.XAResourceInfo;
 import com.ibm.wsspi.sib.core.SICoreConnection;
 import com.ibm.wsspi.sib.core.SICoreConnectionFactory;
-import com.ibm.wsspi.sib.core.exception.SIInsufficientDataForFactoryTypeException;
 import com.ibm.wsspi.sib.core.selector.FactoryType;
 import com.ibm.wsspi.sib.core.selector.SICoreConnectionFactorySelector;
 
@@ -96,5 +93,10 @@ public class SibBatchResourceInfo implements XAResourceInfo {
         } else if (!busName.equals(other.busName))
             return false;
         return true;
+    }
+    
+    @Override
+    public String toString() {
+        return "SibBatchResourceInfo(busName=" + busName + ")";
     }
 }

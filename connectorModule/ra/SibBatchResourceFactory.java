@@ -1,5 +1,8 @@
 package ra;
 
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
 import javax.transaction.xa.XAResource;
 
 import com.ibm.websphere.sib.exception.SIException;
@@ -9,15 +12,33 @@ import com.ibm.ws.Transaction.XAResourceInfo;
 import com.ibm.ws.Transaction.XAResourceNotAvailableException;
 
 public class SibBatchResourceFactory implements XAResourceFactory {
+    private static final Logger logger = Logger.getLogger(SibBatchResourceFactory.class.getName());
+    
+    public SibBatchResourceFactory() {
+        logger.log(Level.FINE, "Factory instance created");
+    }
+    
     public XAResource getXAResource(XAResourceInfo resourceInfo) throws XAResourceNotAvailableException {
-        try {
-            return ((SibBatchResourceInfo)resourceInfo).createConnection().getSIXAResource();
-        } catch (SIException ex) {
-            throw new XAResourceNotAvailableException(ex);
+        if (resourceInfo instanceof SibBatchResourceInfo) {
+            if (logger.isLoggable(Level.FINE)) {
+                logger.log(Level.FINE, "Recreating XAResource from " + resourceInfo);
+            }
+            try {
+                return new SibBatchRecoveryXAResource(((SibBatchResourceInfo)resourceInfo).createConnection());
+            } catch (SIException ex) {
+                throw new XAResourceNotAvailableException(ex);
+            }
+        } else {
+            throw new IllegalArgumentException("Expected a XAResourceInfo instance of type " + SibBatchResourceInfo.class.getName());
         }
     }
 
     public void destroyXAResource(XAResource resource) throws DestroyXAResourceException {
-        // TODO: we need to close the connection here; to make this possible, we need to create an XAResource wrapper around the resource returned by getSIXResource
+        logger.log(Level.FINE, "Destroying XAResource");
+        try {
+            ((SibBatchRecoveryXAResource)resource).destroy();
+        } catch (SIException ex) {
+            throw new DestroyXAResourceException(ex);
+        }
     }
 }
