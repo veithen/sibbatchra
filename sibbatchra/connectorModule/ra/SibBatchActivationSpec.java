@@ -16,6 +16,7 @@ public class SibBatchActivationSpec implements ActivationSpec, Serializable {
     private Destination destination;
     private int maxBatchSize;
     private int batchTimeout;
+    private int maxConcurrency;
     
     public ResourceAdapter getResourceAdapter() {
         return resourceAdapter;
@@ -55,6 +56,14 @@ public class SibBatchActivationSpec implements ActivationSpec, Serializable {
 
     public void setBatchTimeout(int batchTimeout) {
         this.batchTimeout = batchTimeout;
+    }
+
+    public int getMaxConcurrency() {
+        return maxConcurrency;
+    }
+
+    public void setMaxConcurrency(int maxConcurrency) {
+        this.maxConcurrency = maxConcurrency;
     }
 
     public void validate() throws InvalidPropertyException {

@@ -35,6 +35,9 @@ public class SibBatchActivation implements AsynchConsumerCallback {
     private SICoreConnection connection;
     private ConsumerSession session;
     
+    private final Object concurrencyLock = new Object();
+    private int concurrency;
+    
     private final Object batchLock = new Object();
     private int batchId;
     private List<SIBusMessage> batch;
@@ -85,27 +88,40 @@ public class SibBatchActivation implements AsynchConsumerCallback {
         synchronized (batchLock) {
             int maxBatchSize = spec.getMaxBatchSize();
             SIBusMessage message;
+            boolean maxConcurrencyReached = false;
             while ((message = lockedMessages.nextLocked()) != null) {
-                if (batch == null) {
-                    batchId++;
+                if (maxConcurrencyReached) {
                     if (logger.isLoggable(Level.FINE)) {
-                        logger.log(Level.FINE, "Starting new batch with ID " + batchId);
+                        logger.log(Level.FINE, "Unlocking message " + message.getSystemMessageId() + " because maximum concurrency has been reached");
                     }
-                    batch = new ArrayList<SIBusMessage>(maxBatchSize);
-                    batchStartTime = System.currentTimeMillis();
-                }
-                batch.add(message);
-                if (batch.size() == maxBatchSize) {
-                    if (logger.isLoggable(Level.FINE)) {
-                        logger.log(Level.FINE, "Match bax size (" + maxBatchSize + ") reached for batch " + batchId);
-                    }
-                    scheduleBatch();
-                    if (batchTimeoutTask != null) {
+                    lockedMessages.unlockCurrent();
+                } else {
+                    if (batch == null) {
+                        batchId++;
                         if (logger.isLoggable(Level.FINE)) {
-                            logger.log(Level.FINE, "Cancelling batch timeout task " + batchTimeoutTask + " for batch " + batchId);
+                            logger.log(Level.FINE, "Starting new batch with ID " + batchId);
                         }
-                        batchTimeoutTask.cancel();
-                        batchTimeoutTask = null;
+                        batch = new ArrayList<SIBusMessage>(maxBatchSize);
+                        batchStartTime = System.currentTimeMillis();
+                    }
+                    if (logger.isLoggable(Level.FINE)) {
+                        logger.log(Level.FINE, "Adding message " + message.getSystemMessageId() + " to batch " + batchId);
+                    }
+                    batch.add(message);
+                    if (batch.size() == maxBatchSize) {
+                        if (logger.isLoggable(Level.FINE)) {
+                            logger.log(Level.FINE, "Match bax size (" + maxBatchSize + ") reached for batch " + batchId);
+                        }
+                        if (!scheduleBatch()) {
+                            maxConcurrencyReached = true;
+                        }
+                        if (batchTimeoutTask != null) {
+                            if (logger.isLoggable(Level.FINE)) {
+                                logger.log(Level.FINE, "Cancelling batch timeout task " + batchTimeoutTask + " for batch " + batchId);
+                            }
+                            batchTimeoutTask.cancel();
+                            batchTimeoutTask = null;
+                        }
                     }
                 }
             }
@@ -137,20 +153,55 @@ public class SibBatchActivation implements AsynchConsumerCallback {
                     timer.schedule(batchTimeoutTask, new Date(time));
                 } else {
                     logger.log(Level.FINE, "Batch " + batchId + " timed out; schedule immediately");
-                    scheduleBatch();
+                    if (!scheduleBatch()) {
+                        maxConcurrencyReached = true;
+                    }
                 }
+            }
+            if (maxConcurrencyReached) {
+                logger.log(Level.FINE, "Stopping session because maximum concurrency has been reached");
+                session.stop();
             }
         }
     }
     
-    private void scheduleBatch() throws WorkException {
-        logger.log(Level.FINE, "Scheduling batch " + batchId + " for processing");
+    private boolean scheduleBatch() throws WorkException {
+        if (logger.isLoggable(Level.FINE)) {
+            logger.log(Level.FINE, "Scheduling batch " + batchId + " for processing");
+        }
         SibBatchWork work = new SibBatchWork(this, batch, batchId);
         resourceAdapter.getBootstrapContext().getWorkManager().scheduleWork(work, Long.MAX_VALUE, null, work);
         batch = null;
         batchStartTime = -1;
+        synchronized (concurrencyLock) {
+            concurrency++;
+            if (logger.isLoggable(Level.FINE)) {
+                logger.log(Level.FINE, "Batch " + batchId + " submitted to WorkManager; new concurrency: " + concurrency);
+            }
+            return concurrency < spec.getMaxConcurrency();
+        }
     }
 
+    public void batchCompleted(int batchId) {
+        boolean startSession;
+        synchronized (concurrencyLock) {
+            startSession = concurrency == spec.getMaxConcurrency();
+            concurrency--;
+            if (logger.isLoggable(Level.FINE)) {
+                logger.log(Level.FINE, "Received notification that batch " + batchId + " completed; new concurrency: " + concurrency);
+            }
+        }
+        if (startSession) {
+            logger.log(Level.FINE, "Restarting session");
+            try {
+                session.start(false);
+            } catch (SIException ex) {
+                // TODO: we should probably drop the connection and schedule an attempt to reconnect
+                logger.log(Level.SEVERE, "Unable to restart session", ex);
+            }
+        }
+    }
+    
     public void deactivate() {
         timer.cancel();
         

@@ -139,10 +139,9 @@ public class SibBatchWork implements Work, WorkListener {
     }
     
     public void workCompleted(WorkEvent event) {
-        // TODO Auto-generated method stub
-        
         if (logger.isLoggable(Level.FINE)) {
             logger.log(Level.FINE, "Batch " + batchId + ": work completed");
         }
+        activation.batchCompleted(batchId);
     }
 }
