@@ -47,6 +47,9 @@ public class TestMDB implements MessageListener {
             } catch (InterruptedException ex) {
                 Thread.currentThread().interrupt();
             }
+            if (testMessage.isFail()) {
+                throw new EJBException("Message marked with fail=true");
+            }
         } catch (SQLException ex) {
             throw new EJBException(ex);
         } catch (JMSException ex) {

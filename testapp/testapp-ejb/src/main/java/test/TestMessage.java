@@ -8,10 +8,12 @@ public class TestMessage implements Serializable {
     
     private final UUID uuid;
     private final int duration;
+    private final boolean fail;
 
-    public TestMessage(UUID uuid, int duration) {
+    public TestMessage(UUID uuid, int duration, boolean fail) {
         this.uuid = uuid;
         this.duration = duration;
+        this.fail = fail;
     }
 
     public UUID getUuid() {
@@ -20,5 +22,9 @@ public class TestMessage implements Serializable {
 
     public int getDuration() {
         return duration;
+    }
+
+    public boolean isFail() {
+        return fail;
     }
 }

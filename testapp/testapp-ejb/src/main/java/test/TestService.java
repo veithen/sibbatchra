@@ -39,7 +39,7 @@ public class TestService {
     @WebMethod
     @WebResult(name="uuid")
     @TransactionAttribute(TransactionAttributeType.REQUIRED)
-    public String[] put(@WebParam(name="count") int count, @WebParam(name="duration") int duration) {
+    public String[] put(@WebParam(name="count") int count, @WebParam(name="duration") int duration, @WebParam(name="fail") boolean fail) {
         try {
             Connection c = ds.getConnection();
             try {
@@ -56,7 +56,7 @@ public class TestService {
                                     UUID uuid = UUID.randomUUID();
                                     p.setString(1, uuid.toString());
                                     p.addBatch();
-                                    sender.send(session.createObjectMessage(new TestMessage(uuid, duration)));
+                                    sender.send(session.createObjectMessage(new TestMessage(uuid, duration, fail)));
                                     results.add(uuid.toString());
                                 }
                                 p.executeBatch();
