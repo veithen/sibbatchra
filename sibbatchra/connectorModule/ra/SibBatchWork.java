@@ -5,12 +5,12 @@ import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.ejb.TransactionRolledbackLocalException;
 import javax.jms.MessageListener;
 import javax.resource.spi.endpoint.MessageEndpoint;
 import javax.resource.spi.work.Work;
 import javax.resource.spi.work.WorkEvent;
 import javax.resource.spi.work.WorkListener;
-import javax.transaction.Status;
 import javax.transaction.SystemException;
 
 import com.ibm.ws.Transaction.TransactionManagerFactory;
@@ -71,10 +71,13 @@ public class SibBatchWork implements Work, WorkListener {
                         if (logger.isLoggable(Level.FINE)) {
                             logger.log(Level.FINE, "Delivering message with ID " + message.getSystemMessageId() + " to endpoint");
                         }
-                        listener.onMessage(SIJMSMessageFactory.getInstance().createJMSMessage(message));
-                        
-                        if (transactionManager.getTransaction().getStatus() == Status.STATUS_MARKED_ROLLBACK) {
-                            logger.log(Level.FINE, "Transaction has been marked for rollback; stop delivering messages to the endpoint");
+                        try {
+                            listener.onMessage(SIJMSMessageFactory.getInstance().createJMSMessage(message));
+                        } catch (TransactionRolledbackLocalException ex) {
+                            // TransactionRolledbackLocalException is thrown in response to an exception from the MDB that
+                            // will cause the transaction to be flagged as roll back only. If that happens, we stop processing
+                            // the batch because any additional operations would be rolled back anyway.
+                            logger.log(Level.FINE, "Got a TransactionRolledbackLocalException from endpoint invocation; stop delivering messages to the endpoint");
                             forceRollback = true;
                             break;
                         }
@@ -105,7 +108,7 @@ public class SibBatchWork implements Work, WorkListener {
                 }
             }
         } catch (Throwable ex) {
-            ex.printStackTrace(System.out);
+            logger.log(Level.SEVERE, "Exception while delivering messages to endpoint", ex);
         }
     }
 

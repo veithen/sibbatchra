@@ -1,6 +1,7 @@
 package ra;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Timer;
@@ -17,12 +18,14 @@ import com.ibm.websphere.sib.SIDestinationAddress;
 import com.ibm.websphere.sib.SIDestinationAddressFactory;
 import com.ibm.websphere.sib.api.jms.JmsDestination;
 import com.ibm.websphere.sib.exception.SIException;
+import com.ibm.ws.sib.mfp.JsMessage;
 import com.ibm.wsspi.sib.core.AsynchConsumerCallback;
 import com.ibm.wsspi.sib.core.ConsumerSession;
 import com.ibm.wsspi.sib.core.DestinationType;
 import com.ibm.wsspi.sib.core.LockedMessageEnumeration;
 import com.ibm.wsspi.sib.core.SIBusMessage;
 import com.ibm.wsspi.sib.core.SICoreConnection;
+import com.ibm.wsspi.sib.core.SIMessageHandle;
 
 public class SibBatchActivation implements AsynchConsumerCallback {
     private static final Logger logger = Logger.getLogger(SibBatchActivation.class.getName());
@@ -85,16 +88,41 @@ public class SibBatchActivation implements AsynchConsumerCallback {
         if (logger.isLoggable(Level.FINE)) {
             logger.log(Level.FINE, "Got " + lockedMessages.getRemainingMessageCount() + " messages from session");
         }
+        boolean maxConcurrencyReached = false;
+        List<SIMessageHandle> undeliveredMessages = new ArrayList<SIMessageHandle>();
         synchronized (batchLock) {
             int maxBatchSize = spec.getMaxBatchSize();
             SIBusMessage message;
-            boolean maxConcurrencyReached = false;
             while ((message = lockedMessages.nextLocked()) != null) {
                 if (maxConcurrencyReached) {
                     if (logger.isLoggable(Level.FINE)) {
-                        logger.log(Level.FINE, "Unlocking message " + message.getSystemMessageId() + " because maximum concurrency has been reached");
+                        logger.log(Level.FINE, "Skipping message " + message.getSystemMessageId() + " because maximum concurrency has been reached");
                     }
-                    lockedMessages.unlockCurrent();
+                    undeliveredMessages.add(message.getMessageHandle());
+                } else if (((JsMessage)message).getRedeliveredCount() > 0) {
+                    if (batch != null) {
+                        if (logger.isLoggable(Level.FINE)) {
+                            logger.log(Level.FINE, "Closing batch " + batchId + " because we got a redelivered message");
+                        }
+                        if (!scheduleBatch()) {
+                            maxConcurrencyReached = true;
+                        }
+                    }
+                    if (maxConcurrencyReached) {
+                        if (logger.isLoggable(Level.FINE)) {
+                            logger.log(Level.FINE, "Skipping message " + message.getSystemMessageId() + " because maximum concurrency has been reached");
+                        }
+                        undeliveredMessages.add(message.getMessageHandle());
+                    } else {
+                        batchId++;
+                        if (logger.isLoggable(Level.FINE)) {
+                            logger.log(Level.FINE, "Creating batch with ID " + batchId + " containing a single message " + message.getSystemMessageId() + " (redeliveredCount=" + ((JsMessage)message).getRedeliveredCount() + ")");
+                        }
+                        batch = Collections.singletonList(message);
+                        if (!scheduleBatch()) {
+                            maxConcurrencyReached = true;
+                        }
+                    }
                 } else {
                     if (batch == null) {
                         batchId++;
@@ -115,13 +143,6 @@ public class SibBatchActivation implements AsynchConsumerCallback {
                         if (!scheduleBatch()) {
                             maxConcurrencyReached = true;
                         }
-                        if (batchTimeoutTask != null) {
-                            if (logger.isLoggable(Level.FINE)) {
-                                logger.log(Level.FINE, "Cancelling batch timeout task " + batchTimeoutTask + " for batch " + batchId);
-                            }
-                            batchTimeoutTask.cancel();
-                            batchTimeoutTask = null;
-                        }
                     }
                 }
             }
@@ -133,6 +154,7 @@ public class SibBatchActivation implements AsynchConsumerCallback {
                         public void run() {
                             synchronized (batchLock) {
                                 if (batchTimeoutTask == this) {
+                                    batchTimeoutTask = null;
                                     if (logger.isLoggable(Level.FINE)) {
                                         logger.log(Level.FINE, "Batch " + batchId + " timed out");
                                     }
@@ -142,7 +164,6 @@ public class SibBatchActivation implements AsynchConsumerCallback {
                                         // TODO Auto-generated catch block
                                         ex.printStackTrace();
                                     }
-                                    batchTimeoutTask = null;
                                 }
                             }
                         }
@@ -158,14 +179,28 @@ public class SibBatchActivation implements AsynchConsumerCallback {
                     }
                 }
             }
-            if (maxConcurrencyReached) {
-                logger.log(Level.FINE, "Stopping session because maximum concurrency has been reached");
-                session.stop();
+        }
+        if (maxConcurrencyReached) {
+            logger.log(Level.FINE, "Stopping session because maximum concurrency has been reached");
+            session.stop();
+        }
+        if (!undeliveredMessages.isEmpty()) {
+            if (logger.isLoggable(Level.FINE)) {
+                logger.log(Level.FINE, "Unlocking undelivered messages: " + undeliveredMessages);
             }
+            // Passing false as second argument prevents the messaging engine from incrementing the delivery count
+            session.unlockSet(undeliveredMessages.toArray(new SIMessageHandle[undeliveredMessages.size()]), false);
         }
     }
     
     private boolean scheduleBatch() throws WorkException {
+        if (batchTimeoutTask != null) {
+            if (logger.isLoggable(Level.FINE)) {
+                logger.log(Level.FINE, "Cancelling batch timeout task " + batchTimeoutTask + " for batch " + batchId);
+            }
+            batchTimeoutTask.cancel();
+            batchTimeoutTask = null;
+        }
         if (logger.isLoggable(Level.FINE)) {
             logger.log(Level.FINE, "Scheduling batch " + batchId + " for processing");
         }
